@@ -25,142 +25,217 @@ union acct_types {
         struct acct_exit ac_exit;
 };
 
-// struct acct_entry
-// {
-// 	TAILQ_ENTRY(acct_entry) entry;
-//         unsigned short ac_type;
-//         union acct_types acct_t;
-// };
-// TAILQ_HEAD(acct_list, acct_entry);
+struct acct_entry
+{
+	TAILQ_ENTRY(acct_entry) entry;
+        unsigned short ac_type;
+        union acct_types acct_t;
+};
+TAILQ_HEAD(acct_list, acct_entry);
 
-// struct acct_list acct_entries = TAILQ_HEAD_INITIALIZER(acct_entries);
+struct acct_list acct_entries = TAILQ_HEAD_INITIALIZER(acct_entries);
 
-struct rwlock act_lock = RWLOCK_INITIALIZER("ac_lock");
+struct rwlock ac_lock = RWLOCK_INITIALIZER("ac_lock");
 
-struct acct_common common;
-
-struct acct_exit exit;
+int ac_seq_counter = 0;
 
 void
 acct_fork(struct process *p)
 {
-        // struct acct_fork ac_fork;
-        // // struct acct_entry *ac_entry;
+        struct process *parent = p->ps_pptr;
+        struct acct_fork ac_fork;
+        struct acct_entry *ac_entry =
+                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
-        // ac_fork.ac_common.ac_type = ACCT_MSG_FORK;
-        // ac_fork.ac_common.ac_len = sizeof(struct acct_fork);
-        // ac_fork.ac_common.ac_seq = 0;
+        rw_enter_write(&ac_lock);
+        ac_fork.ac_common.ac_seq = ac_seq_counter;
+        ac_seq_counter++;
+        rw_exit_write(&ac_lock);
 
-        // // ac_entry->ac_type = ACCT_MSG_FORK;
-        // // ac_entry->acct_t.ac_fork = ac_fork;
+        ac_fork.ac_common.ac_type = ACCT_MSG_FORK;
+        ac_fork.ac_common.ac_len = sizeof(struct acct_fork);
 
-        // TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
-        printf("fork\n");
+        /* Process name */
+        memcpy(ac_fork.ac_common.ac_comm, parent->ps_comm,
+                sizeof(ac_fork.ac_common.ac_comm));
+
+        /* Elapsed time */
+        ac_fork.ac_common.ac_btime = parent->ps_start;
+	ac_fork.ac_common.ac_etime = parent->ps_start;
+
+        /* Ids */
+        ac_fork.ac_cpid = p->ps_pid;
+        ac_fork.ac_common.ac_pid = parent->ps_pid;
+	ac_fork.ac_common.ac_uid = parent->ps_ucred->cr_ruid;
+	ac_fork.ac_common.ac_gid = parent->ps_ucred->cr_rgid;
+
+	/* Starting terminal */
+	if ((parent->ps_flags & PS_CONTROLT)
+                && parent->ps_pgrp->pg_session->s_ttyp)
+        {
+		ac_fork.ac_common.ac_tty =
+                        parent->ps_pgrp->pg_session->s_ttyp->t_dev;
+        }
+	else
+        {
+                ac_fork.ac_common.ac_tty = NODEV;
+        }
+
+        /* Termination flags */
+	ac_fork.ac_common.ac_flag = parent->ps_acflag;
+
+        /* Enqueue */
+        ac_entry->ac_type = ACCT_MSG_FORK;
+        ac_entry->acct_t.ac_fork = ac_fork;
+
+        rw_enter_write(&ac_lock);
+        TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
+        rw_exit_write(&ac_lock);
 }
 
 void
 acct_exec(struct process *p)
 {
-        // common.ac_etime = p->ps_start;
-        // common.ac_btime = p->ps_start;
-        common.ac_seq++;
-        printf("exec\n");
+        struct acct_exec ac_exec;
+        struct acct_entry *ac_entry =
+                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+
+        rw_enter_write(&ac_lock);
+        ac_exec.ac_common.ac_seq = ac_seq_counter;
+        ac_seq_counter++;
+        rw_exit_write(&ac_lock);
+
+        ac_exec.ac_common.ac_type = ACCT_MSG_EXEC;
+        ac_exec.ac_common.ac_len = sizeof(struct acct_exec);
+
+        /* Process name */
+	memcpy(ac_exec.ac_common.ac_comm, p->ps_comm, sizeof(ac_exec.ac_common.ac_comm));
+
+        /* Elapsed time */
+	ac_exec.ac_common.ac_btime = p->ps_start;
+	ac_exec.ac_common.ac_etime = p->ps_start;
+
+        /* Ids */
+        ac_exec.ac_common.ac_pid = p->ps_pid;
+	ac_exec.ac_common.ac_uid = p->ps_ucred->cr_ruid;
+	ac_exec.ac_common.ac_gid = p->ps_ucred->cr_rgid;
+
+	/* Starting terminal */
+	if ((p->ps_flags & PS_CONTROLT)
+                && p->ps_pgrp->pg_session->s_ttyp)
+        {
+		ac_exec.ac_common.ac_tty =
+                        p->ps_pgrp->pg_session->s_ttyp->t_dev;
+        }
+	else
+        {
+                ac_exec.ac_common.ac_tty = NODEV;
+        }
+
+        /* Termination flags */
+	ac_exec.ac_common.ac_flag = p->ps_acflag;
+
+        /* Enqueue */
+        ac_entry->ac_type = ACCT_MSG_EXEC;
+        ac_entry->acct_t.ac_exec = ac_exec;
+
+        rw_enter_write(&ac_lock);
+        TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
+        rw_exit_write(&ac_lock);
 }
 
 void
 acct_exit(struct process *p)
 {
-	struct acct_exit acct;
-	struct process *pr = p;
+        struct acct_exit ac_exit;
+        struct acct_entry *ac_entry =
+                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 	struct rusage *r;
 
-	// rw_enter_write(&act_lock);
+        rw_enter_write(&ac_lock);
+        ac_exit.ac_common.ac_seq = ac_seq_counter;
+        ac_seq_counter++;
+        rw_exit_write(&ac_lock);
 
-	/*
-	 * Get process accounting information.
-	 */
+        ac_exit.ac_common.ac_type = ACCT_MSG_EXIT;
+        ac_exit.ac_common.ac_len = sizeof(struct acct_exit);
 
-	/* (1) The name of the command that ran */
-	memcpy(acct.ac_common.ac_comm, pr->ps_comm, sizeof(acct.ac_common.ac_comm));
+        /* Process name */
+	memcpy(ac_exit.ac_common.ac_comm, p->ps_comm, sizeof(ac_exit.ac_common.ac_comm));
 
-	/* (3) The elapsed time the command ran (and its starting time) */
-	acct.ac_common.ac_btime = pr->ps_start;
-	acct.ac_common.ac_etime = pr->ps_start;
+        /* Elapsed time */
+	ac_exit.ac_common.ac_btime = p->ps_start;
+	ac_exit.ac_common.ac_etime = p->ps_start;
 
-	/* (4) The average amount of memory used */
+	/* Memory */
 	// r = &(p->ps_mainproc)->p_ru;
 	// timespecadd(&ut, &st, &tmp);
 	// t = tmp.tv_sec * hz + tmp.tv_nsec / (1000 * tick);
 	// if (t)
 	// 	acct.ac_mem = (r->ru_ixrss + r->ru_idrss + r->ru_isrss) / t;
 	// else
-	acct.ac_mem = 0;
+	ac_exit.ac_mem = 0;
 
-	/* (5) The number of disk I/O operations done */
-	acct.ac_io = r->ru_inblock + r->ru_oublock;
+	/* I/O */
+	ac_exit.ac_io = r->ru_inblock + r->ru_oublock;
 
-	/* (6) The UID and GID of the process */
-        acct.ac_common.ac_pid = pr->ps_pid;
-        printf("pid: %i\n", pr->ps_pid);
-	acct.ac_common.ac_uid = pr->ps_ucred->cr_ruid;
-	acct.ac_common.ac_gid = pr->ps_ucred->cr_rgid;
+        /* Ids */
+        ac_exit.ac_common.ac_pid = p->ps_pid;
+	ac_exit.ac_common.ac_uid = p->ps_ucred->cr_ruid;
+	ac_exit.ac_common.ac_gid = p->ps_ucred->cr_rgid;
 
-	/* (7) The terminal from which the process was started */
-	if ((pr->ps_flags & PS_CONTROLT) &&
-	    pr->ps_pgrp->pg_session->s_ttyp)
-		acct.ac_common.ac_tty = pr->ps_pgrp->pg_session->s_ttyp->t_dev;
+	/* Starting terminal */
+	if ((p->ps_flags & PS_CONTROLT)
+                && p->ps_pgrp->pg_session->s_ttyp)
+        {
+		ac_exit.ac_common.ac_tty =
+                        p->ps_pgrp->pg_session->s_ttyp->t_dev;
+        }
 	else
-		acct.ac_common.ac_tty = NODEV;
+        {
+                ac_exit.ac_common.ac_tty = NODEV;
+        }
 
-	/* (8) The boolean flags that tell how the process terminated, etc. */
-	acct.ac_common.ac_flag = pr->ps_acflag;
+        /* Termination flags */
+	ac_exit.ac_common.ac_flag = p->ps_acflag;
 
+        /* Enqueue */
+        ac_entry->ac_type = ACCT_MSG_EXIT;
+        ac_entry->acct_t.ac_exit = ac_exit;
 
-        acct.ac_common.ac_type = ACCT_MSG_EXIT;
-        acct.ac_common.ac_len = sizeof(struct acct_exit);
-        acct.ac_common.ac_seq = 0;
-
-	/*
-	 * Now, just write the accounting information to the file.
-	 */
-	exit = acct;
-
-        printf(">> exit set: %hu %hu %u %s %i %i %i %llu %llu\n",
-                exit.ac_common.ac_type,
-                exit.ac_common.ac_len,
-                exit.ac_common.ac_seq,
-                exit.ac_common.ac_comm,
-                exit.ac_common.ac_pid,
-                exit.ac_common.ac_uid,
-                exit.ac_common.ac_gid,
-                exit.ac_mem,
-                exit.ac_io
-        );
-
-        // rw_exit_write(&act_lock);
+        rw_enter_write(&ac_lock);
+        TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
+        rw_exit_write(&ac_lock);
 }
 
 void
 acctattach(int num)
 {
-        printf("attach\n");
+        return;
 }
 
 int
 acctopen(dev_t dev, int flag, int mode, struct proc *p)
 {
-        printf("open\n");
-        struct process *pr = p->p_p;
-        common.ac_btime = pr->ps_start;
-        common.ac_etime = pr->ps_start;
-        common.ac_seq = 0;
+	if (minor(dev) != 0)
+        {
+		return ENXIO;
+        }
+
+	if ((flag & FWRITE))
+        {
+		return EPERM;
+        }
+
+        rw_enter_write(&ac_lock);
+        ac_seq_counter = 0;
+        rw_exit_write(&ac_lock);
         return 0;
 }
 
 int
 acctclose(dev_t dev, int flag, int mode, struct proc *p)
 {
-        printf("close\n");
         return 0;
 }
 
@@ -172,65 +247,93 @@ acctioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 }
 
 int
-acctread(dev_t dev, struct uio *uio, int flags)
+handle_acct_fork(struct uio *uio, struct acct_fork fork)
 {
-        printf("*read*\n");
-	int error;
-        // switch (common.ac_type) {
-        //         case ACCT_MSG_FORK:
-        //                 common.ac_len = sizeof(struct acct_fork);
-        //                 break;
-        //         case ACCT_MSG_EXEC:
-        //                 common.ac_len = sizeof(struct acct_exec);
-        //                 break;
-        //         case ACCT_MSG_EXIT:
-        //                 common.ac_len = sizeof(struct acct_exit);
-        //                 break;
-        // }
+        // printf(">> %hu %hu %u %s %i %i %i\n",
+        //         fork.ac_common.ac_type,
+        //         fork.ac_common.ac_len,
+        //         fork.ac_common.ac_seq,
+        //         fork.ac_common.ac_comm,
+        //         fork.ac_common.ac_pid,
+        //         fork.ac_common.ac_uid,
+        //         fork.ac_common.ac_gid
+        // );
 
-
-        size_t len = sizeof(struct acct_exit);
-
-        if (exit == NULL) {
-                return 0;
-        }
-
-	if (uio->uio_offset < 0) {
-		return EINVAL;
-        }
-
-        if (uio->uio_offset >= len) {
-                return 0;
-        }
-
-        if (len > uio->uio_resid) {
-                len = uio->uio_resid;
-        }
-        
-        // rw_enter_read(&act_lock);
-
-        printf(">> %hu %hu %u %s %i %i %i %llu %llu\n",
-                exit.ac_common.ac_type,
-                exit.ac_common.ac_len,
-                exit.ac_common.ac_seq,
-                exit.ac_common.ac_comm,
-                exit.ac_common.ac_pid,
-                exit.ac_common.ac_uid,
-                exit.ac_common.ac_gid,
-                exit.ac_mem,
-                exit.ac_io
-        );
-
-        if ((error = uiomove((void *)&exit, sizeof(struct acct_exit), uio)) != 0) {
-                // rw_exit_read(&act_lock);
+	int error = 0;
+        if ((error = uiomove((void *)&fork,
+                sizeof(struct acct_fork), uio)) != 0) {
                 return error;
         }
 
-        exit = NULL;
-        // rw_exit_read(&act_lock);
+        return 0;
+}
 
+int
+handle_acct_exec(struct uio *uio, struct acct_exec exec)
+{
+	int error = 0;
+        if ((error = uiomove((void *)&exec,
+                sizeof(struct acct_exec), uio)) != 0) {
+                return error;
+        }
 
         return 0;
+}
+
+int
+handle_acct_exit(struct uio *uio, struct acct_exit exit)
+{
+        // printf(">> %hu %hu %u %s %i %i %i\n",
+        //         exit.ac_common.ac_type,
+        //         exit.ac_common.ac_len,
+        //         exit.ac_common.ac_seq,
+        //         exit.ac_common.ac_comm,
+        //         exit.ac_common.ac_pid,
+        //         exit.ac_common.ac_uid,
+        //         exit.ac_common.ac_gid
+        // );
+
+	int error = 0;
+        if ((error = uiomove((void *)&exit,
+                sizeof(struct acct_exit), uio)) != 0) {
+                return error;
+        }
+
+        return 0;
+}
+
+int
+acctread(dev_t dev, struct uio *uio, int flags)
+{
+        if (TAILQ_EMPTY(&acct_entries)) {
+                printf("queue empty\n");
+                return 0;
+        }
+        
+        struct acct_entry *ac_entry = TAILQ_FIRST(&acct_entries);
+
+        TAILQ_REMOVE(&acct_entries, ac_entry, entry);
+
+        int error = 0;
+
+        rw_enter_read(&ac_lock);
+        switch (ac_entry->ac_type)
+        {       
+                case ACCT_MSG_FORK:
+                        error = handle_acct_fork(uio, ac_entry->acct_t.ac_fork);
+                        break;
+                case ACCT_MSG_EXEC:
+                        error = handle_acct_exec(uio, ac_entry->acct_t.ac_exec);
+                        break;
+                case ACCT_MSG_EXIT:
+                        error = handle_acct_exit(uio, ac_entry->acct_t.ac_exit);
+                        break;
+        }
+        rw_exit_read(&ac_lock);
+
+        free(ac_entry, M_DEVBUF, sizeof(struct acct_entry));
+
+        return error;
 }
 
 int
