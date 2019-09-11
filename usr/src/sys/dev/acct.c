@@ -1,7 +1,5 @@
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/disk.h>
-#include <sys/event.h>
 #include <sys/limits.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
@@ -13,9 +11,11 @@
 #include <sys/msgbuf.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/resourcevar.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
+#include <sys/kernel.h>
 
 #include <dev/acct.h>
 
@@ -46,6 +46,7 @@ acct_fork(struct process *p)
         struct acct_fork ac_fork;
         struct acct_entry *ac_entry =
                 malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+        struct timespec temp;
 
         rw_enter_write(&ac_lock);
         ac_fork.ac_common.ac_seq = ac_seq_counter;
@@ -59,9 +60,10 @@ acct_fork(struct process *p)
         memcpy(ac_fork.ac_common.ac_comm, parent->ps_comm,
                 sizeof(ac_fork.ac_common.ac_comm));
 
-        /* Elapsed time */
-        ac_fork.ac_common.ac_btime = parent->ps_start;
-	ac_fork.ac_common.ac_etime = parent->ps_start;
+        /* Starting and elapsed time */
+	ac_fork.ac_common.ac_btime = parent->ps_start;
+        nanotime(&temp);
+        timespecsub(&temp, &parent->ps_start, &ac_fork.ac_common.ac_etime);
 
         /* Ids */
         ac_fork.ac_cpid = p->ps_pid;
@@ -99,6 +101,7 @@ acct_exec(struct process *p)
         struct acct_exec ac_exec;
         struct acct_entry *ac_entry =
                 malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+        struct timespec temp;
 
         rw_enter_write(&ac_lock);
         ac_exec.ac_common.ac_seq = ac_seq_counter;
@@ -109,11 +112,13 @@ acct_exec(struct process *p)
         ac_exec.ac_common.ac_len = sizeof(struct acct_exec);
 
         /* Process name */
-	memcpy(ac_exec.ac_common.ac_comm, p->ps_comm, sizeof(ac_exec.ac_common.ac_comm));
+	memcpy(ac_exec.ac_common.ac_comm, p->ps_comm,
+                sizeof(ac_exec.ac_common.ac_comm));
 
-        /* Elapsed time */
+        /* Starting and elapsed time */
 	ac_exec.ac_common.ac_btime = p->ps_start;
-	ac_exec.ac_common.ac_etime = p->ps_start;
+        nanotime(&temp);
+        timespecsub(&temp, &p->ps_start, &ac_exec.ac_common.ac_etime);
 
         /* Ids */
         ac_exec.ac_common.ac_pid = p->ps_pid;
@@ -151,6 +156,8 @@ acct_exit(struct process *p)
         struct acct_entry *ac_entry =
                 malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 	struct rusage *r;
+        struct timespec temp, ut, st;
+        int t;
 
         rw_enter_write(&ac_lock);
         ac_exit.ac_common.ac_seq = ac_seq_counter;
@@ -161,20 +168,27 @@ acct_exit(struct process *p)
         ac_exit.ac_common.ac_len = sizeof(struct acct_exit);
 
         /* Process name */
-	memcpy(ac_exit.ac_common.ac_comm, p->ps_comm, sizeof(ac_exit.ac_common.ac_comm));
+	memcpy(ac_exit.ac_common.ac_comm, p->ps_comm,
+                sizeof(ac_exit.ac_common.ac_comm));
 
-        /* Elapsed time */
+        /* Starting and elapsed time */
 	ac_exit.ac_common.ac_btime = p->ps_start;
-	ac_exit.ac_common.ac_etime = p->ps_start;
+        nanotime(&temp);
+        timespecsub(&temp, &p->ps_start, &ac_exit.ac_common.ac_etime);
 
 	/* Memory */
-	// r = &(p->ps_mainproc)->p_ru;
-	// timespecadd(&ut, &st, &tmp);
-	// t = tmp.tv_sec * hz + tmp.tv_nsec / (1000 * tick);
-	// if (t)
-	// 	acct.ac_mem = (r->ru_ixrss + r->ru_idrss + r->ru_isrss) / t;
-	// else
-	ac_exit.ac_mem = 0;
+	calctsru(&p->ps_tu, &ut, &st, NULL);
+        r = p->ps_ru;
+	timespecadd(&ut, &st, &temp);
+	t = temp.tv_sec * hz + temp.tv_nsec / (1000 * tick);
+	if (t)
+        {
+		ac_exit.ac_mem = (r->ru_ixrss + r->ru_idrss + r->ru_isrss) / t;
+        }
+	else
+        {
+		ac_exit.ac_mem = 0;
+        }
 
 	/* I/O */
 	ac_exit.ac_io = r->ru_inblock + r->ru_oublock;
