@@ -104,6 +104,14 @@ acct_fork(struct process *p)
         rw_enter_write(&ac_lock);
         TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
         rw_exit_write(&ac_lock);
+
+        rw_enter_read(&ac_lock);
+        if (!TAILQ_EMPTY(&acct_entries))
+        {
+                wakeup(&acct_entries);
+                selwakeup(&acct_sel);
+        }
+        rw_exit_read(&ac_lock);
 }
 
 void
@@ -166,6 +174,14 @@ acct_exec(struct process *p)
         rw_enter_write(&ac_lock);
         TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
         rw_exit_write(&ac_lock);
+
+        rw_enter_read(&ac_lock);
+        if (!TAILQ_EMPTY(&acct_entries))
+        {
+                wakeup(&acct_entries);
+                selwakeup(&acct_sel);
+        }
+        rw_exit_read(&ac_lock);
 }
 
 void
@@ -248,6 +264,14 @@ acct_exit(struct process *p)
         rw_enter_write(&ac_lock);
         TAILQ_INSERT_TAIL(&acct_entries, ac_entry, entry);
         rw_exit_write(&ac_lock);
+
+        rw_enter_read(&ac_lock);
+        if (!TAILQ_EMPTY(&acct_entries))
+        {
+                wakeup(&acct_entries);
+                selwakeup(&acct_sel);
+        }
+        rw_exit_read(&ac_lock);
 }
 
 void
@@ -393,18 +417,35 @@ handle_acct_exit(struct uio *uio, struct acct_exit exit)
 int
 acctread(dev_t dev, struct uio *uio, int flags)
 {
-        if (TAILQ_EMPTY(&acct_entries)) {
-                printf("queue empty\n");
-                return 0;
+        struct acct_entry *ac_entry;
+        int error;
+
+        rw_enter_read(&ac_lock);
+        if (!device_opened)
+        {
+                rw_exit_read(&ac_lock);
+                return (0);
+        }
+
+        if (TAILQ_EMPTY(&acct_entries))
+        {
+                rw_exit_read(&ac_lock);
+                tsleep(&acct_entries, PWAIT | PCATCH, "acct_q_empty", 0);
+                rw_enter_read(&ac_lock);
+        }
+
+        if (TAILQ_EMPTY(&acct_entries))
+        {
+                rw_exit_read(&ac_lock);
+                return (0);
         }
         
-        struct acct_entry *ac_entry = TAILQ_FIRST(&acct_entries);
+        ac_entry = TAILQ_FIRST(&acct_entries);
 
         TAILQ_REMOVE(&acct_entries, ac_entry, entry);
 
-        int error = 0;
+        error = 0;
 
-        rw_enter_read(&ac_lock);
         switch (ac_entry->ac_type)
         {       
                 case ACCT_MSG_FORK:
@@ -421,7 +462,7 @@ acctread(dev_t dev, struct uio *uio, int flags)
 
         free(ac_entry, M_DEVBUF, sizeof(struct acct_entry));
 
-        return error;
+        return (error);
 }
 
 int
