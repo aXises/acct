@@ -20,6 +20,9 @@
 
 #include <dev/acct.h>
 
+void filt_acct_detach(struct knote *);
+int  filt_acct_read(struct knote *, long);
+
 union acct_types {
         struct acct_fork ac_fork;
         struct acct_exec ac_exec;
@@ -503,6 +506,41 @@ acctpoll(dev_t dev, int events, struct proc *p)
 int
 acctkqfilter(dev_t dev, struct knote *kn)
 {
-        printf("kqfilter\n");
-        return 0;
+        struct klist *klist;
+	int s;
+
+	switch (kn->kn_filter)
+        {
+                case EVFILT_READ:
+                        klist = &acct_sel.si_note;
+                        kn->kn_fop = &acct_read_filtops;
+                        break;
+                default:
+                        return (EINVAL);
+	}
+
+	s = splbio();
+	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	splx(s);
+	return (0);
 }
+
+void
+filt_acct_detach(struct knote *kn)
+{
+	int s;
+        rw_enter_write(&ac_lock);
+        ac_seq_counter = 0;
+        rw_exit_write(&ac_lock);
+	s = splbio();
+	SLIST_REMOVE(&acct_sel.si_note, kn, knote, kn_selnext);
+	splx(s);
+}
+
+int
+filt_acct_read(struct knote *kn, long hint)
+{
+	kn->kn_data = TAILQ_EMPTY(&acct_entries);
+	return !TAILQ_EMPTY(&acct_entries);
+}
+
