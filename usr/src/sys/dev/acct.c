@@ -50,16 +50,72 @@ int ac_seq_counter = 0;
 
 int device_opened = 0;
 
+struct acct_common
+generate_acct_common(struct process *p, unsigned short ac_type)
+{
+        struct acct_common ac_common;
+        struct timespec temp;
+
+        rw_enter_write(&ac_lock);
+        ac_common.ac_seq = ac_seq_counter;
+        ac_seq_counter++;
+        rw_exit_write(&ac_lock);
+
+        ac_common.ac_type = ac_type;
+        switch (ac_type)
+        {
+                case ACCT_MSG_FORK:
+                        ac_common.ac_len = sizeof(struct acct_fork);
+                        break;
+                case ACCT_MSG_EXEC:
+                        ac_common.ac_len = sizeof(struct acct_exec);
+                        break;
+                case ACCT_MSG_EXIT:
+                        ac_common.ac_len = sizeof(struct acct_exit);
+                        break;
+        }
+
+        /* Process name */
+        memcpy(ac_common.ac_comm, p->ps_comm,
+                sizeof(ac_common.ac_comm));
+
+        /* Starting and elapsed time */
+	ac_common.ac_btime = p->ps_start;
+        nanotime(&temp);
+        timespecsub(&temp, &p->ps_start, &ac_common.ac_etime);
+
+        /* Ids */
+        ac_common.ac_pid = p->ps_pid;
+	ac_common.ac_uid = p->ps_ucred->cr_ruid;
+	ac_common.ac_gid = p->ps_ucred->cr_rgid;
+
+	/* Starting terminal */
+	if ((p->ps_flags & PS_CONTROLT)
+                && p->ps_pgrp->pg_session->s_ttyp)
+        {
+		ac_common.ac_tty = p->ps_pgrp->pg_session->s_ttyp->t_dev;
+        }
+	else
+        {
+                ac_common.ac_tty = NODEV;
+        }
+
+        /* Termination flags */
+	ac_common.ac_flag = p->ps_acflag;
+
+        return ac_common;
+}
+
 void
 acct_fork(struct process *p)
 {
         struct process *parent;
         struct acct_fork ac_fork;
         struct acct_entry *ac_entry;
-        struct timespec temp;
 
         rw_enter_read(&ac_lock);
-        if (!device_opened) {
+        if (!device_opened)
+        {
                 rw_exit_read(&ac_lock);
                 return;
         }
@@ -68,43 +124,8 @@ acct_fork(struct process *p)
         parent = p->ps_pptr;
         ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
-        rw_enter_write(&ac_lock);
-        ac_fork.ac_common.ac_seq = ac_seq_counter;
-        ac_seq_counter++;
-        rw_exit_write(&ac_lock);
-
-        ac_fork.ac_common.ac_type = ACCT_MSG_FORK;
-        ac_fork.ac_common.ac_len = sizeof(struct acct_fork);
-
-        /* Process name */
-        memcpy(ac_fork.ac_common.ac_comm, parent->ps_comm,
-                sizeof(ac_fork.ac_common.ac_comm));
-
-        /* Starting and elapsed time */
-	ac_fork.ac_common.ac_btime = parent->ps_start;
-        nanotime(&temp);
-        timespecsub(&temp, &parent->ps_start, &ac_fork.ac_common.ac_etime);
-
-        /* Ids */
+        ac_fork.ac_common = generate_acct_common(parent, ACCT_MSG_FORK);
         ac_fork.ac_cpid = p->ps_pid;
-        ac_fork.ac_common.ac_pid = parent->ps_pid;
-	ac_fork.ac_common.ac_uid = parent->ps_ucred->cr_ruid;
-	ac_fork.ac_common.ac_gid = parent->ps_ucred->cr_rgid;
-
-	/* Starting terminal */
-	if ((parent->ps_flags & PS_CONTROLT)
-                && parent->ps_pgrp->pg_session->s_ttyp)
-        {
-		ac_fork.ac_common.ac_tty =
-                        parent->ps_pgrp->pg_session->s_ttyp->t_dev;
-        }
-	else
-        {
-                ac_fork.ac_common.ac_tty = NODEV;
-        }
-
-        /* Termination flags */
-	ac_fork.ac_common.ac_flag = parent->ps_acflag;
 
         /* Enqueue */
         ac_entry->ac_type = ACCT_MSG_FORK;
@@ -128,10 +149,10 @@ acct_exec(struct process *p)
 {
         struct acct_exec ac_exec;
         struct acct_entry *ac_entry;
-        struct timespec temp;
 
         rw_enter_read(&ac_lock);
-        if (!device_opened) {
+        if (!device_opened)
+        {
                 rw_exit_read(&ac_lock);
                 return;
         }
@@ -139,42 +160,7 @@ acct_exec(struct process *p)
 
         ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
-        rw_enter_write(&ac_lock);
-        ac_exec.ac_common.ac_seq = ac_seq_counter;
-        ac_seq_counter++;
-        rw_exit_write(&ac_lock);
-
-        ac_exec.ac_common.ac_type = ACCT_MSG_EXEC;
-        ac_exec.ac_common.ac_len = sizeof(struct acct_exec);
-
-        /* Process name */
-	memcpy(ac_exec.ac_common.ac_comm, p->ps_comm,
-                sizeof(ac_exec.ac_common.ac_comm));
-
-        /* Starting and elapsed time */
-	ac_exec.ac_common.ac_btime = p->ps_start;
-        nanotime(&temp);
-        timespecsub(&temp, &p->ps_start, &ac_exec.ac_common.ac_etime);
-
-        /* Ids */
-        ac_exec.ac_common.ac_pid = p->ps_pid;
-	ac_exec.ac_common.ac_uid = p->ps_ucred->cr_ruid;
-	ac_exec.ac_common.ac_gid = p->ps_ucred->cr_rgid;
-
-	/* Starting terminal */
-	if ((p->ps_flags & PS_CONTROLT)
-                && p->ps_pgrp->pg_session->s_ttyp)
-        {
-		ac_exec.ac_common.ac_tty =
-                        p->ps_pgrp->pg_session->s_ttyp->t_dev;
-        }
-	else
-        {
-                ac_exec.ac_common.ac_tty = NODEV;
-        }
-
-        /* Termination flags */
-	ac_exec.ac_common.ac_flag = p->ps_acflag;
+        ac_exec.ac_common = generate_acct_common(p, ACCT_MSG_EXEC);
 
         /* Enqueue */
         ac_entry->ac_type = ACCT_MSG_EXEC;
@@ -212,22 +198,7 @@ acct_exit(struct process *p)
 
         ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
-        rw_enter_write(&ac_lock);
-        ac_exit.ac_common.ac_seq = ac_seq_counter;
-        ac_seq_counter++;
-        rw_exit_write(&ac_lock);
-
-        ac_exit.ac_common.ac_type = ACCT_MSG_EXIT;
-        ac_exit.ac_common.ac_len = sizeof(struct acct_exit);
-
-        /* Process name */
-	memcpy(ac_exit.ac_common.ac_comm, p->ps_comm,
-                sizeof(ac_exit.ac_common.ac_comm));
-
-        /* Starting and elapsed time */
-	ac_exit.ac_common.ac_btime = p->ps_start;
-        nanotime(&temp);
-        timespecsub(&temp, &p->ps_start, &ac_exit.ac_common.ac_etime);
+        ac_exit.ac_common = generate_acct_common(p, ACCT_MSG_EXIT);
 
 	/* Memory */
 	calctsru(&p->ps_tu, &ut, &st, NULL);
@@ -245,26 +216,6 @@ acct_exit(struct process *p)
 
 	/* I/O */
 	ac_exit.ac_io = r->ru_inblock + r->ru_oublock;
-
-        /* Ids */
-        ac_exit.ac_common.ac_pid = p->ps_pid;
-	ac_exit.ac_common.ac_uid = p->ps_ucred->cr_ruid;
-	ac_exit.ac_common.ac_gid = p->ps_ucred->cr_rgid;
-
-	/* Starting terminal */
-	if ((p->ps_flags & PS_CONTROLT)
-                && p->ps_pgrp->pg_session->s_ttyp)
-        {
-		ac_exit.ac_common.ac_tty =
-                        p->ps_pgrp->pg_session->s_ttyp->t_dev;
-        }
-	else
-        {
-                ac_exit.ac_common.ac_tty = NODEV;
-        }
-
-        /* Termination flags */
-	ac_exit.ac_common.ac_flag = p->ps_acflag;
 
         /* Enqueue */
         ac_entry->ac_type = ACCT_MSG_EXIT;
