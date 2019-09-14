@@ -16,6 +16,7 @@
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/kernel.h>
+#include <sys/poll.h>
 
 #include <dev/acct.h>
 
@@ -36,6 +37,11 @@ TAILQ_HEAD(acct_list, acct_entry);
 struct acct_list acct_entries = TAILQ_HEAD_INITIALIZER(acct_entries);
 
 struct rwlock ac_lock = RWLOCK_INITIALIZER("ac_lock");
+
+struct filterops acct_read_filtops =
+	{ 1, NULL, filt_acct_detach, filt_acct_read};
+
+struct selinfo acct_sel;
 
 int ac_seq_counter = 0;
 
@@ -474,8 +480,24 @@ acctwrite(dev_t dev, int flag, int mode, struct proc *p)
 int
 acctpoll(dev_t dev, int events, struct proc *p)
 {
-        printf("poll\n");
-        return 0;
+        int revents;
+        revents = 0;
+
+        if (events & (POLLIN | POLLRDNORM))
+        {
+                rw_enter_read(&ac_lock);
+                if (!TAILQ_EMPTY(&acct_entries))
+                {
+                        revents |= events & (POLLIN | POLLRDNORM);
+                }
+                else
+                {
+                        selrecord(p, &acct_sel);
+                }
+                rw_exit_read(&ac_lock);
+        }
+
+        return (revents);
 }
 
 int
