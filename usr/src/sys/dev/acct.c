@@ -39,14 +39,25 @@ struct rwlock ac_lock = RWLOCK_INITIALIZER("ac_lock");
 
 int ac_seq_counter = 0;
 
+int device_opened = 0;
+
 void
 acct_fork(struct process *p)
 {
-        struct process *parent = p->ps_pptr;
+        struct process *parent;
         struct acct_fork ac_fork;
-        struct acct_entry *ac_entry =
-                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+        struct acct_entry *ac_entry;
         struct timespec temp;
+
+        rw_enter_read(&ac_lock);
+        if (!device_opened) {
+                rw_exit_read(&ac_lock);
+                return;
+        }
+        rw_exit_read(&ac_lock);
+
+        parent = p->ps_pptr;
+        ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
         rw_enter_write(&ac_lock);
         ac_fork.ac_common.ac_seq = ac_seq_counter;
@@ -99,9 +110,17 @@ void
 acct_exec(struct process *p)
 {
         struct acct_exec ac_exec;
-        struct acct_entry *ac_entry =
-                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+        struct acct_entry *ac_entry;
         struct timespec temp;
+
+        rw_enter_read(&ac_lock);
+        if (!device_opened) {
+                rw_exit_read(&ac_lock);
+                return;
+        }
+        rw_exit_read(&ac_lock);
+
+        ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
         rw_enter_write(&ac_lock);
         ac_exec.ac_common.ac_seq = ac_seq_counter;
@@ -153,11 +172,20 @@ void
 acct_exit(struct process *p)
 {
         struct acct_exit ac_exit;
-        struct acct_entry *ac_entry =
-                malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
+        struct acct_entry *ac_entry;
 	struct rusage *r;
         struct timespec temp, ut, st;
         int t;
+
+        rw_enter_read(&ac_lock);
+        if (!device_opened)
+        {
+                rw_exit_read(&ac_lock);
+                return;
+        }
+        rw_exit_read(&ac_lock);
+
+        ac_entry = malloc(sizeof(struct acct_entry), M_DEVBUF, M_WAITOK);
 
         rw_enter_write(&ac_lock);
         ac_exit.ac_common.ac_seq = ac_seq_counter;
@@ -232,19 +260,25 @@ int
 acctopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	if (minor(dev) != 0)
-        {
-		return ENXIO;
+        {       
+		return (ENXIO);
         }
 
 	if ((flag & FWRITE))
         {
-		return EPERM;
+		return (EPERM);
+        }
+
+        if (device_opened)
+        {
+                return (EBUSY);
         }
 
         rw_enter_write(&ac_lock);
         ac_seq_counter = 0;
+        device_opened = 1;
         rw_exit_write(&ac_lock);
-        return 0;
+        return (0);
 }
 
 int
