@@ -342,7 +342,8 @@ handle_acct_fork(struct uio *uio, struct acct_fork fork)
 {
 	int error = 0;
         if ((error = uiomove((void *)&fork,
-                sizeof(struct acct_fork), uio)) != 0) {
+                sizeof(struct acct_fork), uio)) != 0)
+        {
                 return error;
         }
 
@@ -367,7 +368,8 @@ handle_acct_exit(struct uio *uio, struct acct_exit exit)
 {
 	int error = 0;
         if ((error = uiomove((void *)&exit,
-                sizeof(struct acct_exit), uio)) != 0) {
+                sizeof(struct acct_exit), uio)) != 0)
+        {
                 return error;
         }
 
