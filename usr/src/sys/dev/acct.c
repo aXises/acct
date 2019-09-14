@@ -20,8 +20,13 @@
 
 #include <dev/acct.h>
 
-void filt_acct_detach(struct knote *);
-int  filt_acct_read(struct knote *, long);
+struct acct_common generate_acct_common(struct process *, unsigned short);
+size_t             get_next_struct_len();
+int                handle_acct_fork(struct uio *, struct acct_fork);
+int                handle_acct_exec(struct uio *, struct acct_exec);
+int                handle_acct_exit(struct uio *, struct acct_exit);
+void               filt_acct_detach(struct knote *);
+int                filt_acct_read(struct knote *, long);
 
 union acct_types {
         struct acct_fork ac_fork;
@@ -32,8 +37,8 @@ union acct_types {
 struct acct_entry
 {
 	TAILQ_ENTRY(acct_entry) entry;
-        unsigned short ac_type;
-        union acct_types acct_t;
+        unsigned short          ac_type;
+        union acct_types        acct_t;
 };
 TAILQ_HEAD(acct_list, acct_entry);
 
