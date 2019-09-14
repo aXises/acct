@@ -308,7 +308,26 @@ acctopen(dev_t dev, int flag, int mode, struct proc *p)
 int
 acctclose(dev_t dev, int flag, int mode, struct proc *p)
 {
-        return 0;
+        rw_enter_write(&ac_lock);
+        ac_seq_counter = 0;
+        device_opened = 0;
+        rw_exit_write(&ac_lock);
+
+        wakeup(&acct_entries);
+
+        switch (rw_status(&ac_lock))
+        {
+                case RW_WRITE | RW_WRITE_OTHER:
+                        rw_exit_write(&ac_lock);
+                        break;
+                case RW_READ:
+                        rw_exit_read(&ac_lock);
+                        break;
+        }
+
+        return (0);
+}
+
 size_t
 get_next_struct_len()
 {
