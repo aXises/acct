@@ -380,23 +380,13 @@ acctioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 int
 handle_acct_fork(struct uio *uio, struct acct_fork fork)
 {
-        // printf(">> %hu %hu %u %s %i %i %i\n",
-        //         fork.ac_common.ac_type,
-        //         fork.ac_common.ac_len,
-        //         fork.ac_common.ac_seq,
-        //         fork.ac_common.ac_comm,
-        //         fork.ac_common.ac_pid,
-        //         fork.ac_common.ac_uid,
-        //         fork.ac_common.ac_gid
-        // );
-
 	int error = 0;
         if ((error = uiomove((void *)&fork,
                 sizeof(struct acct_fork), uio)) != 0) {
                 return error;
         }
 
-        return 0;
+        return (0);
 }
 
 int
@@ -404,33 +394,24 @@ handle_acct_exec(struct uio *uio, struct acct_exec exec)
 {
 	int error = 0;
         if ((error = uiomove((void *)&exec,
-                sizeof(struct acct_exec), uio)) != 0) {
+                sizeof(struct acct_exec), uio)) != 0)
+        {
                 return error;
         }
 
-        return 0;
+        return (0);
 }
 
 int
 handle_acct_exit(struct uio *uio, struct acct_exit exit)
 {
-        // printf(">> %hu %hu %u %s %i %i %i\n",
-        //         exit.ac_common.ac_type,
-        //         exit.ac_common.ac_len,
-        //         exit.ac_common.ac_seq,
-        //         exit.ac_common.ac_comm,
-        //         exit.ac_common.ac_pid,
-        //         exit.ac_common.ac_uid,
-        //         exit.ac_common.ac_gid
-        // );
-
 	int error = 0;
         if ((error = uiomove((void *)&exit,
                 sizeof(struct acct_exit), uio)) != 0) {
                 return error;
         }
 
-        return 0;
+        return (0);
 }
 
 int
@@ -487,7 +468,7 @@ acctread(dev_t dev, struct uio *uio, int flags)
 int
 acctwrite(dev_t dev, int flag, int mode, struct proc *p)
 {
-        return EOPNOTSUPP;
+        return (EOPNOTSUPP);
 }
 
 int
