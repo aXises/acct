@@ -285,13 +285,53 @@ int
 acctclose(dev_t dev, int flag, int mode, struct proc *p)
 {
         return 0;
+size_t
+get_next_struct_len()
+{
+        size_t size;
+        struct acct_entry *ac_entry;
+
+        size = 0;
+        rw_enter_read(&ac_lock);
+        
+        if (!TAILQ_EMPTY(&acct_entries))
+        {
+                ac_entry = TAILQ_FIRST(&acct_entries);
+                switch (ac_entry->ac_type)
+                {
+                        case(ACCT_MSG_EXIT):
+                                size = sizeof(struct acct_exit);
+                                break;
+                        case(ACCT_MSG_FORK):
+                                size = sizeof(struct acct_fork);
+                                break;
+                        case(ACCT_MSG_EXEC):
+                                size = sizeof(struct acct_exec);
+                                break;
+                }
+        }
+        rw_exit_read(&ac_lock);
+        return size;
 }
 
 int
 acctioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 {
-        printf("ioctl\n");
-        return 0;
+	int error;
+	error = 0;
+
+	switch(cmd)
+        {
+                case FIONREAD:
+                        *(int *)data = get_next_struct_len();
+                        break;
+	        case FIONBIO:
+		/* All handled in the upper FS layer */
+		        break;
+	        default:
+		        error = ENOTTY;
+	}
+	return (error);
 }
 
 int
